@@ -86,7 +86,7 @@ def extract_financial_parameters(file_bytes, file_mime_type, api_key):
         client = genai.Client(api_key=api_key)
         
         # System Instruction: Định rõ vai trò và yêu cầu format JSON
-        system_instruction = (
+        system_instruction_text = (
             "Bạn là một chuyên gia tài chính. Nhiệm vụ của bạn là đọc file mô tả dự án "
             "và trích xuất các tham số quan trọng sau vào định dạng JSON. "
             "Dữ liệu phải là số. WACC và Thuế phải là giá trị thập phân (ví dụ: 10% là 0.1)."
@@ -121,26 +121,28 @@ def extract_financial_parameters(file_bytes, file_mime_type, api_key):
         contents = [
             {
                 "inlineData": {
-                    "data": file_bytes,
+                    "data": file_bytes.decode('latin-1'), # Decode để tránh lỗi khi đọc bytes
                     "mimeType": file_mime_type # Ví dụ: application/vnd.openxmlformats-officedocument.wordprocessingml.document
                 }
             },
             {"text": prompt}
         ]
         
-        config = {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-        }
+        # SỬA LỖI: Đưa system_instruction và response_schema vào tham số 'config'
+        config = genai.types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=response_schema,
+            system_instruction=system_instruction_text, # Đặt system_instruction vào config
+        )
         
         # Áp dụng Exponential Backoff để tăng độ tin cậy của API call
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                # GỌI API ĐÃ SỬA: Bỏ tham số system_instruction trực tiếp
                 response = client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=contents,
-                    system_instruction=system_instruction,
                     config=config,
                 )
                 
@@ -152,7 +154,10 @@ def extract_financial_parameters(file_bytes, file_mime_type, api_key):
                     time.sleep(wait_time)
                 else:
                     raise e
-
+            except UnicodeDecodeError:
+                # Thử lại với decode không cần thiết (dành cho file bytes)
+                contents[0]["inlineData"]["data"] = file_bytes
+                
     except APIError as e:
         st.error(f"Lỗi gọi Gemini API: Vui lòng kiểm tra Khóa API hoặc giới hạn sử dụng. Chi tiết lỗi: {e}")
         return None
